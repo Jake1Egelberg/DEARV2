@@ -1,6 +1,8 @@
 
 if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
   
+  scrape_parms()
+  
   #*****************************************************
   
   #******************CALCULATIONS AND PROCESSING*****************
@@ -13,6 +15,7 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
   
   #Load design matrix
   design_raw<-read.csv(paste(exp_directory,"/Metadata.csv",sep=""),header=TRUE,fileEncoding = 'UTF-8-BOM')
+  design_raw$Seq<-gsub(".fastq.gz","",design_raw$Reads)
   
   #Name sequences
   .GlobalEnv$raw_classes<-levels(as.factor(design_raw$Classification))
@@ -72,34 +75,45 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
                       Var=vars,
                       FC=fcs)
   .GlobalEnv$vars_df<-vars_df[order(vars,decreasing=TRUE),]
+  
   #Join avg of groups to mycpm_cur
   class_avg_cur$Class_Ft<-paste(class_avg_cur$Class,"_",class_avg_cur$Feature,sep="")
   mycpm_cur$Class_Ft<-paste(mycpm_cur$Class,"_",mycpm_cur$Feature,sep="")
   class_avg_cur<-class_avg_cur[,-c(1,3)]
+  class_avg_cur<-unique(class_avg_cur)
   .GlobalEnv$mycpm_cur<-left_join(mycpm_cur,class_avg_cur,by="Class_Ft")
   
   #VOLCANO PLOT
-  #Create DGE obj
-  dge_obj<-DGEList(cpm(countdata))
-  #Normalize counts to correct for sampling bias (natural diff b/w samples)
-  dge_obj_norm<-calcNormFactors(dge_obj)
-  #Estimate mean dispersion across all samples
-  dge_obj_norm<-estimateCommonDisp(dge_obj_norm)
-  #Estimate trended dispersion (mean dispersion across similar abundance genes)
-  dge_obj_norm<-estimateGLMTrendedDisp(dge_obj_norm)
-  #Estimate tagwise dispersion
-  dge_obj_norm<-estimateTagwiseDisp(dge_obj_norm)
-  #Get fit
-  input_design<-data.frame(Intercept=1,
-                           Group=design_raw$GROUP)
-  fit<-glmFit(dge_obj_norm,input_design)
-  .GlobalEnv$fit_data<-glmLRT(fit,coef=input_design$Group)
-  if(length(fit_data$table$logFC)==0){
-    genes<-rownames(fit_data$table)
-    .GlobalEnv$fit_data$table$logFC<-vars_df[which(vars_df$Feature%in%genes),]$FC
-  }
-  .GlobalEnv$tops<-as.data.frame(topTags(fit_data,n=Inf))
-  .GlobalEnv$sig_fts<-tops[which(tops$FDR<0.05),]
+  calc_tests<-lapply(unique(mycpm_cur$Feature),function(x){
+    y<-mycpm_cur[which(mycpm_cur$Feature==x),]
+    #T-test
+    test<-t.test(y$Log2CPM~y$Class,alternative="two.sided",var.equal=FALSE,paired=FALSE)
+    #Get one-sided raw p value
+    p_val<-(test$p.value)/2
+    df<-data.frame(Feature=x,P_Raw=p_val)
+  })
+  raw_sig_fts<-bind_rows(calc_tests)
+  
+  #Calculate false discovery rate
+  raw_sig_fts$FDR<-p.adjust(raw_sig_fts$P_Raw,method="fdr")
+  
+  #Join to data
+  .GlobalEnv$vars_df<-left_join(vars_df,raw_sig_fts,by="Feature")
+  rownames(vars_df)<-vars_df$Feature
+  
+  #Calc metrics
+  .GlobalEnv$vars_df$Log2AbsFC<-log2(abs(vars_df$FC))
+  .GlobalEnv$vars_df$LogFDR<-log(vars_df$FDR,base=10)*-1
+  vars_df$Sig<-NA
+  .GlobalEnv$vars_df[which(vars_df$FDR<0.05),]$Sig<-"Y"
+  .GlobalEnv$vars_df[which(vars_df$FDR>=0.05),]$Sig<-"N"
+  .GlobalEnv$vars_df<-vars_df[order(vars_df$LogFDR,decreasing=TRUE),]
+  
+  #Get sig fts
+  sig_fts<-vars_df[which(vars_df$Sig=="Y"),]
+
+  #plot(vars_df$Log2AbsFC,vars_df$LogFDR,col=ifelse(vars_df$Sig=="Y","red","black"))
+  #abline(h=-log(0.05),col="red")
   
   #Close progress bar
   close(calc_prog)
@@ -370,16 +384,21 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
         tkbind(ft_list,"<<ListboxSelect>>",feature_sel_fun)
         
     } else if(plot_type_val=="Volcano Plot"){
-      sig_ft_var<-tclVar(rownames(sig_fts))
+      sig_ft_var<-tclVar(rownames(vars_df))
+      .GlobalEnv$use_curs<-FALSE
       
       #Reset graph parms
       reset_graph_parms()
       
       sel_sig_ft<-function(){
-        .GlobalEnv$selected_sig_ft<-rownames(tops)[as.numeric(tkcurselection(volc_sigs))+1]
+        if(use_curs==FALSE){
+          .GlobalEnv$selected_sig_ft<-rownames(vars_df)[as.numeric(tkcurselection(volc_sigs))+1]
+        } else{
+          .GlobalEnv$selected_sig_ft<-rownames(vars_df_cur)[as.numeric(tkcurselection(volc_sigs))+1]
+        }
         print(selected_sig_ft)
-        tkconfigure(det1_det,text=round(vars_df[which(vars_df$Feature==selected_sig_ft),]$FC,digits=3))
-        tkconfigure(det2_det,text=round(tops[which(rownames(tops)==selected_sig_ft),]$FDR,digits=3))
+        tkconfigure(det1_det,text=round(vars_df[which(vars_df$Feature==selected_sig_ft),]$Log2AbsFC,digits=3))
+        tkconfigure(det2_det,text=round(vars_df[which(rownames(vars_df)==selected_sig_ft),]$LogFDR,digits=3))
         build_plot_fun()
       }
       
@@ -537,54 +556,61 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
       if(apply_threshold_val=="1"){
         #Get genes below thresh
         .GlobalEnv$below<-unique(mycpm_cur[which(mycpm_cur$CPM<saved_thresh),]$Feature)
+        
+        #Reset selected gene if below thresh
+        if(is.na(selected_sig_ft)==FALSE&&selected_sig_ft%in%below){
+          selected_sig_ft<-NA
+        }
+        
         if(length(below)>0){
           #Remove genes below thresh
-          tops_cur<-tops[-which(rownames(tops)%in%below),] 
-          if(length(which(rownames(sig_fts)%in%below))>0){
-            sig_fts_cur<-sig_fts[-which(rownames(sig_fts)%in%below),]
-            new_names<-rownames(sig_fts)
-            new_names[which(rownames(sig_fts)%in%below)]<-paste(new_names[which(rownames(sig_fts)%in%below)]," - BELOW",sep="")
-            tkconfigure(volc_sigs,listvariable=tclVar(new_names))
-          }
+          vars_df_cur<-vars_df[-which(rownames(vars_df)%in%below),] 
+          tkconfigure(volc_sigs,listvariable=tclVar(rownames(vars_df_cur)))
+          .GlobalEnv$use_curs<-TRUE
           
         } else{
-          tops_cur<-tops
+          vars_df_cur<-vars_df
         }
       } else{
-        tops_cur<-tops
-        tkconfigure(volc_sigs,listvariable=tclVar(rownames(tops)))
+        vars_df_cur<-vars_df
+        tkconfigure(volc_sigs,listvariable=tclVar(rownames(vars_df_cur)))
       }
       
-      tops_cur$Col="black"
-      tops_cur[which(tops_cur$FDR<0.05),]$Col<-"red"
-      tops_cur$Size<-0.2
-      tops_cur$Text<-0
+      #Set default display options
+      vars_df_cur$Col="black"
+      vars_df_cur[which(vars_df_cur$Sig=="Y"),]$Col<-"red"
+      vars_df_cur$Size<-0.2
+      vars_df_cur$Text<-0
+      
       #Get selected sig ft
-      if(is.na(selected_sig_ft)==FALSE){
-        tops_cur[which(rownames(tops_cur)==selected_sig_ft),]$Col<-"darkgreen"
-        tops_cur[which(rownames(tops_cur)==selected_sig_ft),]$Text<-1.5
-        #Reorder data
-        new_ord<-c((1:nrow(tops_cur))[-which(rownames(tops_cur)==selected_sig_ft)],which(rownames(tops_cur)==selected_sig_ft))
-        tops_cur<-tops_cur[new_ord,]
-      }  else{
-        selected_sig_ft<-""
+      if(length(selected_sig_ft)>0){
+        if(is.na(selected_sig_ft)==FALSE){
+          vars_df_cur[which(rownames(vars_df_cur)==selected_sig_ft),]$Col<-"darkgreen"
+          vars_df_cur[which(rownames(vars_df_cur)==selected_sig_ft),]$Text<-1.5
+          .GlobalEnv$sel_sig_dat<-vars_df_cur[which(rownames(vars_df_cur)==selected_sig_ft),]
+        }  else{
+          selected_sig_ft<-NA
+        }
+      } else{
+        selected_sig_ft<-NA
       }
       
-      #Ensure that -log10(FDR=0) is not Inf
-      if(length(which(-log10(tops_cur$FDR)==Inf))>0){
-        tops_cur[which(-log10(tops_cur$FDR)==Inf),]$FDR<-0.01
-      }
+
+      .GlobalEnv$vars_df_cur<-vars_df_cur
       
-      .GlobalEnv$plot<-ggplot(data=tops_cur,aes(x=logFC,y=-log10(FDR)))+
-        geom_point(size=tops_cur$Size,col=tops_cur$Col,alpha=1)+
-        geom_text(label=selected_sig_ft,size=tops_cur$Text,col="darkgreen",vjust=-1,fontface="bold")+
-        geom_hline(yintercept = -log10(0.05),size=0.1,col="red")+
+      .GlobalEnv$plot<-ggplot(data=vars_df_cur,aes(x=Log2AbsFC,y=LogFDR))+
+        geom_point(size=vars_df_cur$Size,col=vars_df_cur$Col,alpha=1)+
+        geom_hline(yintercept = -log(0.05,base=10),size=0.1,col="red")+
         xlab("Log2(CPM) Fold Change")+
-        ylab("-log10(False Discovery Rate)")+
-        scale_y_continuous(n.breaks=10,limits=c(NA,1.1*max(-log10(tops_cur$FDR))))+
+        ylab("-log10(FDR)")+
+        scale_y_continuous(n.breaks=10,limits=c(NA,1.1*max(vars_df_cur$LogFDR)))+
         theme_bw()+
         plot_theme()+
         theme(axis.text.x = element_text(angle=0,hjust=0))
+      if(is.na(selected_sig_ft)==FALSE){
+        .GlobalEnv$plot<-plot+geom_text(inherit.aes=FALSE,data=sel_sig_dat,aes(x=Log2AbsFC,y=LogFDR),label=selected_sig_ft,size=sel_sig_dat$Text,col=sel_sig_dat$Col,vjust=-1,fontface="bold")
+      }
+      
       
     }
     
