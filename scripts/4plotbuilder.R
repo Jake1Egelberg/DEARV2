@@ -105,7 +105,9 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
   .GlobalEnv$vars_df$Log2AbsFC<-log2(abs(vars_df$FC))
   .GlobalEnv$vars_df$LogFDR<-log(vars_df$FDR,base=10)*-1
   vars_df$Sig<-NA
-  .GlobalEnv$vars_df[which(vars_df$FDR<0.05),]$Sig<-"Y"
+  if(length(which(vars_df$FDR<0.05))>0){
+    .GlobalEnv$vars_df[which(vars_df$FDR<0.05),]$Sig<-"Y" 
+  }
   .GlobalEnv$vars_df[which(vars_df$FDR>=0.05),]$Sig<-"N"
   .GlobalEnv$vars_df<-vars_df[order(vars_df$LogFDR,decreasing=TRUE),]
   
@@ -578,7 +580,9 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
       
       #Set default display options
       vars_df_cur$Col="black"
-      vars_df_cur[which(vars_df_cur$Sig=="Y"),]$Col<-"red"
+      if(length(which(vars_df_cur$Sig=="Y"))>0){
+        vars_df_cur[which(vars_df_cur$Sig=="Y"),]$Col<-"red" 
+      }
       vars_df_cur$Size<-0.2
       vars_df_cur$Text<-0
       
