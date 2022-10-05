@@ -125,6 +125,8 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
     
   } else{
     
+    tk_messageBox(message="Metrics already detected. Loading saved data.")
+    
     #Read mycpm_cur (raw cpm & log2cpm data)
     .GlobalEnv$mycpm_cur<-read.csv(paste(fastq_dir,"/cpm.csv",sep=""))
     
