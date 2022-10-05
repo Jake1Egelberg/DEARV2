@@ -413,12 +413,12 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
       tkbind(volc_sigs,"<<ListboxSelect>>",sel_sig_ft)
       display_info<-tklabel(plot_parms_frame,text="Feature details",font=normal_font)
       tkgrid(display_info,row=3,column=1,columnspan=2)
-      det1<-tklabel(plot_parms_frame,text="Fold change =",font=normal_font)
-      tkgrid(det1,row=4,column=1,pady=2,sticky="w",padx=5)
+      det1<-tklabel(plot_parms_frame,text="Log2(FC) =",font=normal_font)
+      tkgrid(det1,row=4,column=1,pady=2,sticky="w",padx=20)
       det1_det<-tklabel(plot_parms_frame,text="",font=normal_font)
       tkgrid(det1_det,row=4,column=1,pady=2,sticky="e",padx=40)
-      det2<-tklabel(plot_parms_frame,text="FDR = ",font=normal_font)
-      tkgrid(det2,row=5,column=1,pady=2,sticky="w",padx=50)
+      det2<-tklabel(plot_parms_frame,text="-log10(FDR) = ",font=normal_font)
+      tkgrid(det2,row=5,column=1,pady=2,sticky="w",padx=5)
       det2_det<-tklabel(plot_parms_frame,text="",font=normal_font)
       tkgrid(det2_det,row=5,column=1,pady=2,sticky="e",padx=40)
       
@@ -605,7 +605,7 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
       .GlobalEnv$plot<-ggplot(data=vars_df_cur,aes(x=Log2AbsFC,y=LogFDR))+
         geom_point(size=vars_df_cur$Size,col=vars_df_cur$Col,alpha=1)+
         geom_hline(yintercept = -log(0.05,base=10),size=0.1,col="red")+
-        xlab("Log2(CPM) Fold Change")+
+        xlab("Log2(Mean CPM Fold Change)")+
         ylab("-log10(FDR)")+
         scale_y_continuous(n.breaks=10,limits=c(NA,1.1*max(vars_df_cur$LogFDR)))+
         theme_bw()+
