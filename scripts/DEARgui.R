@@ -996,8 +996,10 @@ run_dear<-function(){
                                min=0,max=100,width=300)
           
           .GlobalEnv$re_count_stat<-tclvalue(recount_ft_var)
-          if(re_count_stat=="1"&&file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
+          if(re_count_stat=="1"){
             file.remove(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))
+            file.remove(paste(fastq_dir,"/cpm.csv",sep=""))
+            file.remove(paste(fastq_dir,"/fcs.csv",sep=""))
           }
           
           .GlobalEnv$prog_val<-33
@@ -1266,3 +1268,6 @@ meta_disp<-tklabel(preview_frame,text="NO read annotation",font=normal_font)
 tkgrid(meta_disp,pady=7)
 #Wait for input
 tkwait.window(top)
+
+
+
