@@ -13,109 +13,131 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
                             label="Calculating metrics...",
                             min=0,max=100,width=300,initial=50)
   
-  #Load design matrix
-  design_raw<-read.csv(paste(exp_directory,"/Metadata.csv",sep=""),header=TRUE,fileEncoding = 'UTF-8-BOM')
-  design_raw$Seq<-gsub(".fastq.gz","",design_raw$Reads)
+  if(length(list.files(path=fastq_dir,pattern="cpm.csv"))==0||length(list.files(path=fastq_dir,pattern="fcs.csv"))==0){
+    
+    #Load design matrix
+    design_raw<-read.csv(paste(exp_directory,"/Metadata.csv",sep=""),header=TRUE,fileEncoding = 'UTF-8-BOM')
+    design_raw$Seq<-gsub(".fastq.gz","",design_raw$Reads)
+    
+    #Name sequences
+    .GlobalEnv$raw_classes<-levels(as.factor(design_raw$Classification))
+    .GlobalEnv$class_seq<-paste(design_raw[which(design_raw$Classification==raw_classes[1]),]$Classification,1:length(design_raw[which(design_raw$Classification==raw_classes[1]),]$Classification),sep=" ")
+    .GlobalEnv$class_seq<-c(class_seq,paste(design_raw[which(design_raw$Classification==raw_classes[2]),]$Classification,1:length(design_raw[which(design_raw$Classification==raw_classes[2]),]$Classification),sep=" "))
+    .GlobalEnv$classes<-design_raw$Classification
+    
+    #Load count data
+    countdata_raw<-read.csv(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""),header=TRUE,fileEncoding = 'UTF-8-BOM')
+    rownames(countdata_raw)<-countdata_raw$X
+    countdata_raw<-countdata_raw[,-1,drop=FALSE]
+    
+    #GET COUNTDATA
+    .GlobalEnv$countdata<-countdata_raw
+    #Get sequence names
+    seqs<-names(countdata_raw)
+    
+    #Remove features with 0 reads
+    .GlobalEnv$zero_count_features<-rownames(countdata[rowSums(countdata==0)>=1,])
+    if(length(zero_count_features)>0){
+      #Remove genes
+      .GlobalEnv$countdata<-countdata[-which(rownames(countdata)%in%zero_count_features),]
+    }
+    
+    #FORMAT FOR GGPLOT
+    mycpm<-lapply(1:length(seqs),function(x){
+      tmp_counts<-countdata[,x,drop=FALSE]
+      df<-data.frame(Seq=names(tmp_counts),Feature=rownames(tmp_counts),Reads=tmp_counts[,1])
+      df$CPM<-(df$Reads/sum(df$Reads))*1000000
+      df$Log2CPM<-log2(df$CPM)
+      df$Class<-classes[x]
+      df$ClassSeq<-class_seq[x]
+      out<-df
+    })
+    .GlobalEnv$mycpm_cur<-bind_rows(mycpm)
+    
+    #READS/CPM (get data for <30 reads)
+    .GlobalEnv$reads_plot_data<-mycpm_cur[which(mycpm_cur$Reads<quantile(mycpm_cur$Reads,0.1)[[1]]),]
+    
+    #HEATMAP (get average log2(cpm) within each group, calculate var and FC b/w groups)
+    class_avg<-lapply(classes,function(x){
+      tmp<-mycpm_cur[which(mycpm_cur$Class==x),]
+      avgs<-tapply(tmp$Log2CPM,tmp$Feature,mean)
+      out<-data.frame(Feature=names(avgs),Avg=avgs,Class=x)
+    })
+    class_avg_cur<-bind_rows(class_avg)
+    rownames(class_avg_cur)<-NULL
+    #Get var and fc(Mean(Log2CPM)) b/w groups
+    fold_change_func<-function(x){
+      y<-unique(x)
+      out<-y[1]/y[2]
+    }
+    vars<-tapply(class_avg_cur$Avg,class_avg_cur$Feature,var)
+    fcs<-tapply(class_avg_cur$Avg,class_avg_cur$Feature,fold_change_func)
+    #Create df matching feature with var(mean(log2(cpm))) and fc
+    vars_df<-data.frame(Feature=names(vars),
+                        Var=vars,
+                        FC=fcs)
+    .GlobalEnv$vars_df<-vars_df[order(vars,decreasing=TRUE),]
+    
+    #Join avg of groups to mycpm_cur
+    class_avg_cur$Class_Ft<-paste(class_avg_cur$Class,"_",class_avg_cur$Feature,sep="")
+    mycpm_cur$Class_Ft<-paste(mycpm_cur$Class,"_",mycpm_cur$Feature,sep="")
+    class_avg_cur<-class_avg_cur[,-c(1,3)]
+    class_avg_cur<-unique(class_avg_cur)
+    .GlobalEnv$mycpm_cur<-left_join(mycpm_cur,class_avg_cur,by="Class_Ft")
+    
+    #VOLCANO PLOT
+    calc_tests<-lapply(unique(mycpm_cur$Feature),function(x){
+      y<-mycpm_cur[which(mycpm_cur$Feature==x),]
+      #T-test
+      test<-t.test(y$Log2CPM~y$Class,alternative="two.sided",var.equal=FALSE,paired=FALSE)
+      #Get one-sided raw p value
+      p_val<-(test$p.value)/2
+      df<-data.frame(Feature=x,P_Raw=p_val)
+    })
+    raw_sig_fts<-bind_rows(calc_tests)
+    
+    #Calculate false discovery rate
+    raw_sig_fts$FDR<-p.adjust(raw_sig_fts$P_Raw,method="fdr")
+    
+    #Join to data
+    .GlobalEnv$vars_df<-left_join(vars_df,raw_sig_fts,by="Feature")
+    rownames(vars_df)<-vars_df$Feature
+    
+    #Calc metrics
+    .GlobalEnv$vars_df$Log2AbsFC<-log2(abs(vars_df$FC))
+    .GlobalEnv$vars_df$LogFDR<-log(vars_df$FDR,base=10)*-1
+    vars_df$Sig<-NA
+    if(length(which(vars_df$FDR<0.05))>0){
+      .GlobalEnv$vars_df[which(vars_df$FDR<0.05),]$Sig<-"Y" 
+    }
+    .GlobalEnv$vars_df[which(vars_df$FDR>=0.05),]$Sig<-"N"
+    .GlobalEnv$vars_df<-vars_df[order(vars_df$LogFDR,decreasing=TRUE),]
+    
+    #Get sig fts
+    sig_fts<-vars_df[which(vars_df$Sig=="Y"),]
   
-  #Name sequences
-  .GlobalEnv$raw_classes<-levels(as.factor(design_raw$Classification))
-  .GlobalEnv$class_seq<-paste(design_raw[which(design_raw$Classification==raw_classes[1]),]$Classification,1:length(design_raw[which(design_raw$Classification==raw_classes[1]),]$Classification),sep=" ")
-  .GlobalEnv$class_seq<-c(class_seq,paste(design_raw[which(design_raw$Classification==raw_classes[2]),]$Classification,1:length(design_raw[which(design_raw$Classification==raw_classes[2]),]$Classification),sep=" "))
-  .GlobalEnv$classes<-design_raw$Classification
-  
-  #Load count data
-  countdata_raw<-read.csv(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""),header=TRUE,fileEncoding = 'UTF-8-BOM')
-  rownames(countdata_raw)<-countdata_raw$X
-  countdata_raw<-countdata_raw[,-1,drop=FALSE]
-  
-  #GET COUNTDATA
-  .GlobalEnv$countdata<-countdata_raw
-  #Get sequence names
-  seqs<-names(countdata_raw)
-  
-  #Remove features with 0 reads
-  .GlobalEnv$zero_count_features<-rownames(countdata[rowSums(countdata==0)>=1,])
-  if(length(zero_count_features)>0){
-    #Remove genes
-    .GlobalEnv$countdata<-countdata[-which(rownames(countdata)%in%zero_count_features),]
+    #plot(vars_df$Log2AbsFC,vars_df$LogFDR,col=ifelse(vars_df$Sig=="Y","red","black"))
+    #abline(h=-log(0.05),col="red")
+    
+    #Save data
+    write.csv(mycpm_cur,paste(fastq_dir,"/cpm.csv",sep=""),row.names=FALSE)
+    write.csv(vars_df,paste(fastq_dir,"/fcs.csv",sep=""),row.names=TRUE)
+    
+  } else{
+    
+    #Read mycpm_cur (raw cpm & log2cpm data)
+    .GlobalEnv$mycpm_cur<-read.csv(paste(fastq_dir,"/cpm.csv",sep=""))
+    
+    #READS/CPM (get data for <30 reads)
+    .GlobalEnv$reads_plot_data<-mycpm_cur[which(mycpm_cur$Reads<quantile(mycpm_cur$Reads,0.1)[[1]]),]
+    
+    #Read vars_df (variances, fcs and stats)
+    .GlobalEnv$vars_df<-read.table(paste(fastq_dir,"/fcs.csv",sep=""),row.names = 1,sep=",",header=TRUE)
+    
+    #Get sig fts (FDR<0.05)
+    sig_fts<-vars_df[which(vars_df$Sig=="Y"),]
+    
   }
-  
-  #FORMAT FOR GGPLOT
-  mycpm<-lapply(1:length(seqs),function(x){
-    tmp_counts<-countdata[,x,drop=FALSE]
-    df<-data.frame(Seq=names(tmp_counts),Feature=rownames(tmp_counts),Reads=tmp_counts[,1])
-    df$CPM<-(df$Reads/sum(df$Reads))*1000000
-    df$Log2CPM<-log2(df$CPM)
-    df$Class<-classes[x]
-    df$ClassSeq<-class_seq[x]
-    out<-df
-  })
-  .GlobalEnv$mycpm_cur<-bind_rows(mycpm)
-  
-  #READS/CPM (get data for <30 reads)
-  .GlobalEnv$reads_plot_data<-mycpm_cur[which(mycpm_cur$Reads<quantile(mycpm_cur$Reads,0.1)[[1]]),]
-  
-  #HEATMAP (get average log2(cpm) within each group, calculate var and FC b/w groups)
-  class_avg<-lapply(classes,function(x){
-    tmp<-mycpm_cur[which(mycpm_cur$Class==x),]
-    avgs<-tapply(tmp$Log2CPM,tmp$Feature,mean)
-    out<-data.frame(Feature=names(avgs),Avg=avgs,Class=x)
-  })
-  class_avg_cur<-bind_rows(class_avg)
-  rownames(class_avg_cur)<-NULL
-  #Get var and fc(Mean(Log2CPM)) b/w groups
-  fold_change_func<-function(x){
-    y<-unique(x)
-    out<-y[1]/y[2]
-  }
-  vars<-tapply(class_avg_cur$Avg,class_avg_cur$Feature,var)
-  fcs<-tapply(class_avg_cur$Avg,class_avg_cur$Feature,fold_change_func)
-  #Create df matching feature with var(mean(log2(cpm))) and fc
-  vars_df<-data.frame(Feature=names(vars),
-                      Var=vars,
-                      FC=fcs)
-  .GlobalEnv$vars_df<-vars_df[order(vars,decreasing=TRUE),]
-  
-  #Join avg of groups to mycpm_cur
-  class_avg_cur$Class_Ft<-paste(class_avg_cur$Class,"_",class_avg_cur$Feature,sep="")
-  mycpm_cur$Class_Ft<-paste(mycpm_cur$Class,"_",mycpm_cur$Feature,sep="")
-  class_avg_cur<-class_avg_cur[,-c(1,3)]
-  class_avg_cur<-unique(class_avg_cur)
-  .GlobalEnv$mycpm_cur<-left_join(mycpm_cur,class_avg_cur,by="Class_Ft")
-  
-  #VOLCANO PLOT
-  calc_tests<-lapply(unique(mycpm_cur$Feature),function(x){
-    y<-mycpm_cur[which(mycpm_cur$Feature==x),]
-    #T-test
-    test<-t.test(y$Log2CPM~y$Class,alternative="two.sided",var.equal=FALSE,paired=FALSE)
-    #Get one-sided raw p value
-    p_val<-(test$p.value)/2
-    df<-data.frame(Feature=x,P_Raw=p_val)
-  })
-  raw_sig_fts<-bind_rows(calc_tests)
-  
-  #Calculate false discovery rate
-  raw_sig_fts$FDR<-p.adjust(raw_sig_fts$P_Raw,method="fdr")
-  
-  #Join to data
-  .GlobalEnv$vars_df<-left_join(vars_df,raw_sig_fts,by="Feature")
-  rownames(vars_df)<-vars_df$Feature
-  
-  #Calc metrics
-  .GlobalEnv$vars_df$Log2AbsFC<-log2(abs(vars_df$FC))
-  .GlobalEnv$vars_df$LogFDR<-log(vars_df$FDR,base=10)*-1
-  vars_df$Sig<-NA
-  if(length(which(vars_df$FDR<0.05))>0){
-    .GlobalEnv$vars_df[which(vars_df$FDR<0.05),]$Sig<-"Y" 
-  }
-  .GlobalEnv$vars_df[which(vars_df$FDR>=0.05),]$Sig<-"N"
-  .GlobalEnv$vars_df<-vars_df[order(vars_df$LogFDR,decreasing=TRUE),]
-  
-  #Get sig fts
-  sig_fts<-vars_df[which(vars_df$Sig=="Y"),]
-
-  #plot(vars_df$Log2AbsFC,vars_df$LogFDR,col=ifelse(vars_df$Sig=="Y","red","black"))
-  #abline(h=-log(0.05),col="red")
   
   #Close progress bar
   close(calc_prog)
