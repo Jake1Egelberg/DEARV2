@@ -139,6 +139,17 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
     #Get sig fts (FDR<0.05)
     sig_fts<-vars_df[which(vars_df$Sig=="Y"),]
     
+    #Load design matrix
+    design_raw<-read.csv(paste(exp_directory,"/Metadata.csv",sep=""),header=TRUE,fileEncoding = 'UTF-8-BOM')
+    design_raw$Seq<-gsub(".fastq.gz","",design_raw$Reads)
+    
+    #Name sequences
+    .GlobalEnv$raw_classes<-levels(as.factor(design_raw$Classification))
+    .GlobalEnv$class_seq<-paste(design_raw[which(design_raw$Classification==raw_classes[1]),]$Classification,1:length(design_raw[which(design_raw$Classification==raw_classes[1]),]$Classification),sep=" ")
+    .GlobalEnv$class_seq<-c(class_seq,paste(design_raw[which(design_raw$Classification==raw_classes[2]),]$Classification,1:length(design_raw[which(design_raw$Classification==raw_classes[2]),]$Classification),sep=" "))
+    .GlobalEnv$classes<-design_raw$Classification
+    
+    
   }
   
   #Close progress bar
