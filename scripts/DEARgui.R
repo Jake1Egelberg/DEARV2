@@ -827,8 +827,23 @@ edit_design<-function(){
       .GlobalEnv$value_cur<-unlist(values)
       print(value_cur)
       
-      if(" "%in%value_cur){
+      if(" "%in%value_cur&&length(which(value_cur!=" "))>0){
         tk_messageBox(message="You must annotate all reads!")
+      } else if(" "%in%value_cur&&length(which(value_cur!=" "))==0){
+        #Create empty metadata if dont annotate anything
+        meta_df<-data.frame(Reads=just_f_names,
+                            Filepath=forward_files,
+                            Classification="",
+                            GROUP="")
+        
+        #Prompt user to manually annotate in editor
+        tk_messageBox(message="No annotations entered. Initiating manual input.")
+        meta_df_cur<-edit(meta_df)
+        
+        #Write csv
+        write.csv(meta_df_cur,paste(exp_directory,"/Metadata.csv",sep=""),row.names = FALSE)
+        tkdestroy(annotate)
+        
       } else{
         if(length(unique(value_cur))>1){
           #Create metadata
@@ -901,6 +916,12 @@ edit_design<-function(){
     tkgrid(top_frame)
     top_lbl<-tklabel(top_frame,text="Annotate reads:",font=header_font)
     tkgrid(top_lbl,padx=50,row=1,column=1,columnspan=2)
+    #Enter button
+    enter_ann<-tkbutton(top_frame,text="Save annotation",command=ann_reads_func)
+    tkgrid(enter_ann,column=1,row=2,pady=5)
+    #Change group label
+    group_lbl<-tkbutton(top_frame,text="Adjust group name",command=adjust_group_fun)
+    tkgrid(group_lbl,column=2,row=2,pady=5)
     lapply(1:length(just_f_names),function(x){
       tmp<-just_f_names[x]
       if(str_count(tmp)>22){
@@ -910,7 +931,7 @@ edit_design<-function(){
       #Label
       assign(paste("read",x,sep=""),
              tklabel(top_frame,text=tmp))
-      tkgrid(eval(parse(text=paste("read",x,sep=""))),column=1,row=1+x,padx=10)
+      tkgrid(eval(parse(text=paste("read",x,sep=""))),column=1,row=3+x,padx=10)
       #Combobox
       if(file.exists(paste(exp_directory,"/Metadata.csv",sep=""))==TRUE){
         assign(paste("group",x,sep=""),
@@ -921,14 +942,8 @@ edit_design<-function(){
                ttkcombobox(top_frame,values=group_sel_choices,textvariable=assign(paste("check",x,sep=""),tclVar(" "),envir = .GlobalEnv),width=12))
         
       }
-      tkgrid(eval(parse(text=paste("group",x,sep=""))),column=2,row=1+x,padx=10,pady=5)
+      tkgrid(eval(parse(text=paste("group",x,sep=""))),column=2,row=3+x,padx=10,pady=5)
     })
-    #Enter button
-    enter_ann<-tkbutton(top_frame,text="Save annotation",command=ann_reads_func)
-    tkgrid(enter_ann,column=1,row=2+length(just_f_names),pady=5)
-    #Change group label
-    group_lbl<-tkbutton(top_frame,text="Adjust group name",command=adjust_group_fun)
-    tkgrid(group_lbl,column=2,row=2+length(just_f_names),pady=5)
     tkwait.window(annotate)
     
   } else{
