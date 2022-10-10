@@ -1038,12 +1038,13 @@ run_dear<-function(){
           
           #Restrict forward files to those that haven't been analyzed
           bam_files<-list.files(path=forward_dir,pattern=".BAM$")
-          tryCatch(detected_bams<-str_detect(bam_files,just_f_names),
-                   warning=function(w){
-                     tk_messageBox(message="There are too many .BAM files! Stopping analysis.")
-                     close(prog)
-                     stop()
-                   })
+          raw_detected_bams<-lapply(just_f_names,function(x){
+            y<-str_detect(bam_files,x)
+            out<-which(y==TRUE)
+          })
+          detected_bam_inds<-unlist(raw_detected_bams)
+          detected_bams<-bam_files[detected_bam_inds]
+          
           if(length(detected_bams)==0){
             #If none fastq aligned
             tryCatch(source(paste(directory,"/scripts/2alignreads.R",sep="")),error=function(e){
@@ -1057,12 +1058,12 @@ run_dear<-function(){
           } else if(length(detected_bams)>0&&length(which(detected_bams==TRUE))<length(forward_files)){
             #If only some fastq already aligned
             tk_messageBox(message="Some .BAM files are missing! Only these will be generated!")
-            .GlobalEnv$forward_files<-forward_files[which(detected_bams==FALSE)]
-            .GlobalEnv$just_f_names<-just_f_names[which(detected_bams==FALSE)]
+            .GlobalEnv$forward_files<-forward_files[-detected_bam_inds]
+            .GlobalEnv$just_f_names<-just_f_names[-detected_bam_inds]
             
             if(cur_reverse_reads=="1"){
-              .GlobalEnv$reverse_files<-reverse_files[which(detected_bams==FALSE)]
-              .GlobalEnv$just_r_names<-just_r_names[which(detected_bams==FALSE)]
+              .GlobalEnv$reverse_files<-reverse_files[-detected_bam_inds]
+              .GlobalEnv$just_r_names<-just_r_names[-detected_bam_inds]
             }
             
             tryCatch(source(paste(directory,"/scripts/2alignreads.R",sep="")),error=function(e){
@@ -1283,6 +1284,4 @@ meta_disp<-tklabel(preview_frame,text="NO read annotation",font=normal_font)
 tkgrid(meta_disp,pady=7)
 #Wait for input
 tkwait.window(top)
-
-
 
