@@ -461,7 +461,7 @@ install_files_func<-function(){
               if(read_type=="Paired-end"){
                 acc_prefix<-str_sub(z,0,6)
                 last_dig<-paste("0",str_sub(z,-2),sep="")
-                link<-paste("ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_dig,"/",z,sep="")
+                link<-paste("http://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_dig,"/",z,sep="")
                 
                 file1<-paste(link,"/",z,"_1.fastq.gz",sep="")
                 file2<-paste(link,"/",z,"_2.fastq.gz",sep="")
@@ -487,8 +487,8 @@ install_files_func<-function(){
                 acc_prefix<-str_sub(z,0,6)
                 last_dig<-paste("00",str_sub(z,-1),sep="")
                 last_two_dig<-paste("0",str_sub(z,-2),sep="")
-                link<-paste("ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_dig,"/",z,sep="")
-                link_alt<-paste("ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_two_dig,"/",z,sep="")
+                link<-paste("http://ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_dig,"/",z,sep="")
+                link_alt<-paste("http://ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_two_dig,"/",z,sep="")
                 .GlobalEnv$file1<-paste(link,"/",z,".fastq.gz",sep="")
                 .GlobalEnv$file1_alt<-paste(link_alt,"/",z,"_1.fastq.gz",sep="")
                 
