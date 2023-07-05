@@ -1,9 +1,10 @@
 
-#--------------------DEFAULTS
 
-.GlobalEnv$plot_type_var<-tclVar("Reads/CPM")
-.GlobalEnv$thresh<-"auto"
+#--------------------RUN REGARDLESS
 
+.GlobalEnv$design_path<-paste(exp_directory,"/Metadata.csv",sep="")
+
+if(file.exists(design_path)==TRUE){
 #Read design matrix
 design_raw<-read.csv(paste(exp_directory,"/Metadata.csv",sep=""),header=TRUE,fileEncoding = 'UTF-8-BOM')
 design_raw$Seq<-gsub(".fastq.gz","",design_raw$Reads)
@@ -18,203 +19,253 @@ design_raw$Seq<-gsub(".fastq.gz","",design_raw$Reads)
 .GlobalEnv$classes<-unique(design_raw$Classification)
 .GlobalEnv$class_num<-length(classes)
 
-#--------------------FUNCTIONS
+.GlobalEnv$save_file<-paste(fastq_dir,"/analysisdata.Rdata",sep="")
 
-#Start prog bar
-.GlobalEnv$an_prog<-winProgressBar(title="DEAR Analysis and Visualization",
-                                   label="Loading analysis functions...",
-                                   initial=10,min=0,max=100,width=300)
-
-#Read data fun, returns countdata
-.GlobalEnv$read_inputs<-function(){
+if(file.exists(save_file)==FALSE){
   
-  tryCatch(setWinProgressBar(an_prog,value=20,label="Reading raw feature counts..."),
-           error=function(e)print("no prog"))
+  .GlobalEnv$thresh<-"auto"
   
-  #Load count data
-  countdata_raw<-read.csv(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""),header=TRUE,fileEncoding = 'UTF-8-BOM')
-  #Read first col as rownames
-  rownames(countdata_raw)<-countdata_raw$X
-  countdata_raw<-countdata_raw[,-1,drop=FALSE]
-  #GET COUNTDATA
-  .GlobalEnv$countdata<-countdata_raw
-   
-  return(countdata)
-}
-
-#Filter lowly expressed genes
-.GlobalEnv$filter_genes<-function(countdata,thresh){
+  #--------------------FUNCTIONS
   
-  tryCatch(setWinProgressBar(an_prog,value=30,label="Removing lowly expressed genes..."),
-           error=function(e)print("no prog"))
+  #Start prog bar
+  .GlobalEnv$an_prog<-winProgressBar(title="DEAR Analysis and Visualization",
+                                     label="Loading analysis functions...",
+                                     initial=10,min=0,max=100,width=300)
   
-  #Get CPM
-  .GlobalEnv$cpm_data<-cpm(countdata)
-  
-  if(thresh=="auto"){
-    #Determine thresh automatically, cpm that corresponds to counts of 10
+  #Read data fun, returns countdata
+  .GlobalEnv$read_inputs<-function(){
     
-    #For each sequence (column, get cpm that corresponds to 10)
-    diff_to_10<-function(x){
-      x_dat<-countdata[,x]
-      vec<-abs(abs(x_dat)-10)
-      ind<-which(vec==min(vec))[1]
-      cor_cpm<-cpm_data[ind,x]
-      return(cor_cpm)
-    }
-    counts_cor<-unlist(lapply(1:ncol(countdata),diff_to_10))
+    tryCatch(setWinProgressBar(an_prog,value=20,label="Reading raw feature counts..."),
+             error=function(e)print("no prog"))
     
-    #Get threshhold as mean
-    use_thresh<-as.numeric(round(mean(counts_cor),1))
+    #Load count data
+    countdata_raw<-read.csv(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""),header=TRUE,fileEncoding = 'UTF-8-BOM')
+    #Read first col as rownames
+    rownames(countdata_raw)<-countdata_raw$X
+    countdata_raw<-countdata_raw[,-1,drop=FALSE]
+    #GET COUNTDATA
+    .GlobalEnv$countdata<-countdata_raw
     
-  } else{
-    use_thresh<-as.numeric(thresh)
+    return(countdata)
   }
-  .GlobalEnv$use_thresh<-use_thresh
+  
+  #Filter lowly expressed genes
+  .GlobalEnv$filter_genes<-function(countdata,thresh){
+    
+    tryCatch(setWinProgressBar(an_prog,value=30,label="Removing lowly expressed genes..."),
+             error=function(e)print("no prog"))
+    
+    #Get CPM
+    .GlobalEnv$cpm_data<-cpm(countdata)
+    
+    if(thresh=="auto"){
+      #Determine thresh automatically, cpm that corresponds to counts of 10
+      
+      #For each sequence (column, get cpm that corresponds to 10)
+      diff_to_10<-function(x){
+        x_dat<-countdata[,x]
+        vec<-abs(abs(x_dat)-10)
+        ind<-which(vec==min(vec))[1]
+        cor_cpm<-cpm_data[ind,x]
+        return(cor_cpm)
+      }
+      counts_cor<-unlist(lapply(1:ncol(countdata),diff_to_10))
+      
+      #Get threshhold as mean
+      use_thresh<-as.numeric(round(mean(counts_cor),1))
+      
+    } else{
+      use_thresh<-as.numeric(thresh)
+    }
+    .GlobalEnv$use_thresh<-use_thresh
+    
+    #Get well expressed genes
+    cpm_data_thresh<-cpm_data>use_thresh
+    good_gene_inds<-which(apply(cpm_data_thresh,1,sum)>=1)
+    
+    print(use_thresh)
+    print(nrow(cpm_data))
+    print(nrow(countdata[good_gene_inds,]))
+    
+    return(countdata[good_gene_inds,])
+    
+  }
+  
+  #Process data fun
+  .GlobalEnv$process_data<-function(countdata_cur,design){
+    #Remove features with 0 reads
+    .GlobalEnv$zero_count_features<-rownames(countdata_cur[rowSums(countdata_cur==0)>=1,])
+    if(length(zero_count_features)>0){
+      #Remove genes
+      print(paste("removing ",length(zero_count_features)," zero  counts features"),sep="")
+      countdata_cur<-countdata_cur[-which(rownames(countdata_cur)%in%zero_count_features),]
+      .GlobalEnv$countdata_cur<-countdata_cur
+    } 
+    
+    tryCatch(setWinProgressBar(an_prog,value=40,label="Converting to DGEList..."),
+             error=function(e)print("no prog"))
+    
+    #Convert to a DGE obj
+    dgeObj<-DGEList(countdata_cur)
+    
+    tryCatch(setWinProgressBar(an_prog,value=50,label="Normalizing"),
+             error=function(e)print("no prog"))
+    
+    #Normalize
+    dgeObj_norm<-calcNormFactors(dgeObj)
+    
+    tryCatch(setWinProgressBar(an_prog,value=60,label="Calculating between-group variance..."),
+             error=function(e)print("no prog"))
+    
+    #Get between-group (total dataset) variation
+    dgeObj_bwvar<-estimateCommonDisp(dgeObj_norm)
+    
+    tryCatch(setWinProgressBar(an_prog,value=70,label="Calculating within-group variance..."),
+             error=function(e)print("no prog"))
+    
+    #Get within-group (within gene) variation
+    dgeObj_wivar<-estimateGLMTrendedDisp(dgeObj_bwvar)
+    dgeObj_tag<-estimateTagwiseDisp(dgeObj_wivar)
+    
+    tryCatch(setWinProgressBar(an_prog,value=80,label="Fitting linear model..."),
+             error=function(e)print("no prog"))
+    
+    #Fit GLM
+    fit<-glmFit(dgeObj_tag,design)
+    
+    #Conduct lilklihood ratio test for significance
+    lrt<-glmLRT(fit)
+    
+    #Calculate FDR for all genes
+    top_genes<-topTags(lrt,n=nrow(lrt$table))
+    
+    out_list<-list()
+    out_list[[length(out_list)+1]]<-dgeObj
+    out_list[[length(out_list)+1]]<-as.data.frame(top_genes)
+    
+    return(out_list)
+  }
+  
+  #--------------------RUN ON OPEN
+  
+  #Read countdata
+  countdata<-read_inputs()
+  names(countdata)<-design_raw$Seq
   
   #Get well expressed genes
-  cpm_data_thresh<-cpm_data>use_thresh
-  good_gene_inds<-which(apply(cpm_data_thresh,1,sum)>=1)
+  .GlobalEnv$countdata_cur<-filter_genes(countdata,thresh)
   
-  print(use_thresh)
-  print(nrow(cpm_data))
-  print(nrow(countdata[good_gene_inds,]))
+  #Get significance
+  .GlobalEnv$sig_list<-process_data(countdata_cur,design)
+  .GlobalEnv$raw_dge<-sig_list[[1]]
+  .GlobalEnv$annot_genes<-sig_list[[2]]
   
-  return(countdata[good_gene_inds,])
+  #Order by feature for volcano plot
+  .GlobalEnv$annot_genes_ord<-annot_genes[order(rownames(annot_genes)),]
   
-}
-
-#Process data fun
-.GlobalEnv$process_data<-function(countdata_cur,design){
-  #Remove features with 0 reads
-  .GlobalEnv$zero_count_features<-rownames(countdata_cur[rowSums(countdata_cur==0)>=1,])
-  if(length(zero_count_features)>0){
-    #Remove genes
-    print(paste("removing ",length(zero_count_features)," zero  counts features"),sep="")
-    countdata_cur<-countdata_cur[-which(rownames(countdata_cur)%in%zero_count_features),]
-    .GlobalEnv$countdata_cur<-countdata_cur
-  } 
+  #Get all features for volcano plot
+  .GlobalEnv$annot_fts<-rownames(annot_genes_ord)
   
-  tryCatch(setWinProgressBar(an_prog,value=40,label="Converting to DGEList..."),
+  tryCatch(setWinProgressBar(an_prog,value=90,label="Formatting data..."),
            error=function(e)print("no prog"))
   
-  #Convert to a DGE obj
-  dgeObj<-DGEList(countdata_cur)
+  #Aggregate data for reads/cpm and library distribution plot
+  quality_control_list<-lapply(1:ncol(countdata_cur),function(x){
+    tmp_counts<-countdata_cur[,x,drop=FALSE]
+    seq=names(tmp_counts)
+    features=rownames(tmp_counts)
+    reads=tmp_counts[,1]
+    cpm<-(reads/sum(reads))*1000000
+    log2cpm<-log2(cpm)
+    class<-design_raw[which(design_raw$Seq==seq),]$Classification
+    
+    df<-data.frame(Seq=seq,
+                   Feature=features,
+                   Reads=reads,
+                   CPM=cpm,
+                   Log2CPM=log2cpm,
+                   Class=class)
+    return(df)
+  })
+  quality_control_df<-bind_rows(quality_control_list)
+  quality_control_df$ClassSeq<-paste(quality_control_df$Class,quality_control_df$Seq,sep="_")
+  quality_control_df$FeatureClass<-paste(quality_control_df$Feature,quality_control_df$Class,sep="_")
+  .GlobalEnv$quality_control_df<-quality_control_df
   
-  tryCatch(setWinProgressBar(an_prog,value=50,label="Normalizing"),
-           error=function(e)print("no prog"))
+  #Get data for library sizes plot
+  .GlobalEnv$lib_sizes<-data.frame(Seq=rownames(raw_dge$samples),
+                                   Size=raw_dge$samples$lib.size,
+                                   Class=design_raw[match(rownames(raw_dge$samples),design_raw$Seq),]$Classification)
   
-  #Normalize
-  dgeObj_norm<-calcNormFactors(dgeObj)
-  
-  tryCatch(setWinProgressBar(an_prog,value=60,label="Calculating between-group variance..."),
-           error=function(e)print("no prog"))
-  
-  #Get between-group (total dataset) variation
-  dgeObj_bwvar<-estimateCommonDisp(dgeObj_norm)
-  
-  tryCatch(setWinProgressBar(an_prog,value=70,label="Calculating within-group variance..."),
-           error=function(e)print("no prog"))
-  
-  #Get within-group (within gene) variation
-  dgeObj_wivar<-estimateGLMTrendedDisp(dgeObj_bwvar)
-  dgeObj_tag<-estimateTagwiseDisp(dgeObj_wivar)
-  
-  tryCatch(setWinProgressBar(an_prog,value=80,label="Fitting linear model..."),
-           error=function(e)print("no prog"))
-  
-  #Fit GLM
-  fit<-glmFit(dgeObj_tag,design)
-  
-  #Conduct lilklihood ratio test for significance
-  lrt<-glmLRT(fit)
-  
-  #Calculate FDR for all genes
-  top_genes<-topTags(lrt,n=nrow(lrt$table))
-  
-  out_list<-list()
-  out_list[[length(out_list)+1]]<-dgeObj
-  out_list[[length(out_list)+1]]<-as.data.frame(top_genes)
-  
-  return(out_list)
-}
-
-#--------------------RUN ON OPEN
-
-#Read countdata
-countdata<-read_inputs()
-names(countdata)<-design_raw$Seq
-
-#Get well expressed genes
-.GlobalEnv$countdata_cur<-filter_genes(countdata,thresh)
-
-#Get significance
-.GlobalEnv$sig_list<-process_data(countdata_cur,design)
-.GlobalEnv$raw_dge<-sig_list[[1]]
-.GlobalEnv$annot_genes<-sig_list[[2]]
-
-tryCatch(setWinProgressBar(an_prog,value=90,label="Formatting data..."),
-         error=function(e)print("no prog"))
-
-#Aggregate data for reads/cpm and library distribution plot
-quality_control_list<-lapply(1:ncol(countdata_cur),function(x){
-  tmp_counts<-countdata_cur[,x,drop=FALSE]
-  seq=names(tmp_counts)
-  features=rownames(tmp_counts)
-  reads=tmp_counts[,1]
-  cpm<-(reads/sum(reads))*1000000
-  log2cpm<-log2(cpm)
-  class<-design_raw[which(design_raw$Seq==seq),]$Classification
-  
-  df<-data.frame(Seq=seq,
-                 Feature=features,
-                 Reads=reads,
-                 CPM=cpm,
-                 Log2CPM=log2cpm,
-                 Class=class)
-  return(df)
-})
-quality_control_df<-bind_rows(quality_control_list)
-quality_control_df$ClassSeq<-paste(quality_control_df$Class,quality_control_df$Seq,sep="_")
-quality_control_df$FeatureClass<-paste(quality_control_df$Feature,quality_control_df$Class,sep="_")
-.GlobalEnv$quality_control_df<-quality_control_df
-
-#Get data for library sizes plot
-.GlobalEnv$lib_sizes<-data.frame(Seq=rownames(raw_dge$samples),
-                                 Size=raw_dge$samples$lib.size,
-                                 Class=design_raw[match(rownames(raw_dge$samples),design_raw$Seq),]$Classification)
-
-#Match data for heatmap plot
+  #Match data for heatmap plot
   #Feature, Class, Log2CPM, logFC, FDR 
   #Get LogFC and FDR
-.GlobalEnv$all_features<-rownames(annot_genes)
-.GlobalEnv$all_features_var<-tclVar(all_features)
-heat_data<-data.frame(Feature=rep(all_features,class_num),
-                      LogFC=rep(annot_genes$logFC,class_num),
-                      FDR=rep(annot_genes$FDR,class_num),
-                      Class=unlist(lapply(classes,function(x){rep(x,times=nrow(annot_genes))})))
-heat_data$FeatureClass<-paste(heat_data$Feature,heat_data$Class,sep="_")
-
+  .GlobalEnv$all_features<-unique(quality_control_df$Feature)
+  
+  heat_data<-data.frame(Feature=rep(all_features,class_num),
+                        Class=unlist(lapply(classes,function(x){rep(x,times=nrow(annot_genes))})))
+  heat_data$FeatureClass<-paste(heat_data$Feature,heat_data$Class,sep="_")
+  
   #Get feature, class, Log2CPM
-#Average data over feature class
-na.rm.mean<-function(x){
-  return(mean(x,na.rm=TRUE))
+  #Average data over feature class
+  na.rm.mean<-function(x){
+    return(mean(x,na.rm=TRUE))
+  }
+  means<-tapply(quality_control_df$CPM,quality_control_df$FeatureClass,na.rm.mean)
+  logmeans<-tapply(quality_control_df$Log2CPM,quality_control_df$FeatureClass,na.rm.mean)
+  
+  #Match to LogFC and FDR data
+  heat_data$CPM<-means[match(heat_data$FeatureClass,names(means))]
+  heat_data$Log2CPM<-logmeans
+  
+  annot_matches<-match(heat_data$Feature,rownames(annot_genes_ord))
+  
+  heat_data$LogFC<-annot_genes_ord[annot_matches,]$logFC
+  heat_data$FDR<-annot_genes_ord[annot_matches,]$FDR
+  
+  #Sort by logFC
+  heat_data_ord<-heat_data[order(abs(heat_data$LogFC),decreasing=TRUE),]
+  .GlobalEnv$heat_data_ord<-heat_data_ord
+  
+  tryCatch(setWinProgressBar(an_prog,value=95,label="Saving analysis..."),
+           error=function(e)print("no prog"))
+  
+  #Save dfs needed for analysis in Rdata
+  save(list=c("use_thresh",
+            "quality_control_df",
+             "lib_sizes",
+            "heat_data_ord",
+            "all_features",
+            "annot_genes_ord",
+            "annot_fts"),file=save_file)
+} else{
+  
+  #Start prog bar
+  .GlobalEnv$an_prog<-winProgressBar(title="DEAR Analysis and Visualization",
+                                     label="Loading analysis...",
+                                     initial=50,min=0,max=100,width=300)
+  
+  load(save_file,envir=.GlobalEnv)
+  
 }
-means<-tapply(quality_control_df$CPM,quality_control_df$FeatureClass,na.rm.mean)
 
-#Match to LogFC and FDR data
-heat_data$CPM<-means[match(heat_data$FeatureClass,names(means))]
 
-#Sort by logFC
-heat_data_ord<-heat_data[order(heat_data$LogFC,decreasing=TRUE),]
-heat_data_ord$Log2CPM<-round(log2(heat_data_ord$CPM),3)
-.GlobalEnv$heat_data_ord<-heat_data_ord
+
+#Get variables for plotting from dfs
+
+#Annotation vars for volcano plot
+.GlobalEnv$annot_fts_var<-tclVar(annot_fts)
+#All features for heatmap
+.GlobalEnv$all_features_var<-tclVar(all_features)
 
 #--------------------PLOT FUNCTIONS
+
+.GlobalEnv$plot_type_var<-tclVar("Reads/CPM")
 
 .GlobalEnv$show_raw_cpm_var<-tclVar("1")
 .GlobalEnv$show_raw_cpm_val<-"1"
 .GlobalEnv$displated_features<-all_features[1:10]
+.GlobalEnv$cur_volc_point<-""
 
 .GlobalEnv$plot_theme<-function(){
   theme(axis.text = element_text(size=15),
@@ -227,7 +278,7 @@ heat_data_ord$Log2CPM<-round(log2(heat_data_ord$CPM),3)
 #Save the plot
 .GlobalEnv$save_plot_function<-function(){
   setwd(plot_dir)
-  ggsave(paste(str_replace_all(cur_plot_type,"/","_"),".png",sep=""),plot=plot,width=600,height=500,units = "px")
+  ggsave(paste(str_replace_all(cur_plot_type,"/","_"),".png",sep=""),plot=plot,width=15,height=10)
   shell.exec(paste(plot_dir,"/",paste(str_replace_all(cur_plot_type,"/","_"),".png",sep=""),sep=""))
 }
 
@@ -257,6 +308,12 @@ heat_data_ord$Log2CPM<-round(log2(heat_data_ord$CPM),3)
         geom_hline(yintercept=10,size=0.3,lty="dashed",col="blue")+
         facet_grid(rows=vars(Seq))+
         theme_classic() 
+      
+      if(min(tmp_seqs$Reads)>=10){
+        .GlobalEnv$plot<-plot+
+          geom_text(label="No reads below 10 to remove",x=use_thresh,y=12)
+      }
+      
     }
     
   } else if(cur_plot_type=="Library Sizes"){
@@ -267,6 +324,7 @@ heat_data_ord$Log2CPM<-round(log2(heat_data_ord$CPM),3)
       theme_classic()+
       scale_fill_manual(values=c("gray60","gray40"))+
       ylab("Library Size")+
+      xlab("")+
       scale_y_continuous(n.breaks=10)+
       theme(axis.text.x = element_text(angle=45,hjust=1,vjust=1))
     
@@ -275,21 +333,34 @@ heat_data_ord$Log2CPM<-round(log2(heat_data_ord$CPM),3)
     #Generate library distribution plot
     .GlobalEnv$plot<-ggplot(quality_control_df,aes(x=Seq,y=Log2CPM))+
       geom_boxplot(size=0.1,outlier.size=0.1,outlier.alpha = 1,outlier.color="red",width=0.7)+
-      xlab("Sequence")+
+      xlab("")+
       theme_classic()+
       theme(axis.text.x = element_text(angle=45,hjust=1,vjust=1))
     
   } else if(cur_plot_type=="Volcano Plot"){
     
     #Volcano plot
-    .GlobalEnv$plot<-ggplot(annot_genes,aes(x=logFC,y=-log10(FDR)))+
-      geom_point(col=ifelse(annot_genes$FDR<0.05,"red","black"),size=1)+
+    .GlobalEnv$plot<-ggplot(annot_genes_ord,aes(x=logFC,y=-log10(FDR)))+
+      geom_point(col=ifelse(annot_genes_ord$FDR<0.05,"red","black"),size=1)+
       scale_y_continuous(n.breaks=10)+
       scale_x_continuous(n.breaks=10)+
       geom_hline(yintercept=-log10(0.05),col="blue",lty="dashed")+
       xlab("Log(FC)")+
       ylab("-log10(False Discovery Rate (FDR))")+
       theme_classic()
+    if(cur_volc_point!=""){
+      
+      sel_pt_dat<-annot_genes_ord[which(rownames(annot_genes_ord)==cur_volc_point),]
+      sel_pt_label<-paste("Feature: ",rownames(sel_pt_dat),"\n",
+                          "LogFC: ",round(sel_pt_dat$logFC,3),"\n",
+                          "FDR: ",round(sel_pt_dat$FDR,6),sep="")
+      
+      .GlobalEnv$plot<-plot+
+        geom_point(data=sel_pt_dat,col="purple",shape=21,fill="yellow",size=6)+
+        geom_label(data=sel_pt_dat,fill="yellow",col="purple",size=6,aes(x=min(annot_genes_ord$logFC),y=0),label=sel_pt_label,vjust=-0.5,hjust=0,label.padding=unit(0.15,"in"))+
+        geom_label(data=sel_pt_dat,label=cur_volc_point,col="purple",fill="yellow",hjust=-0.2,vjust=1.2)
+      
+    }
     
   } else if(cur_plot_type=="Heatmap"){
 
@@ -298,13 +369,13 @@ heat_data_ord$Log2CPM<-round(log2(heat_data_ord$CPM),3)
     
     .GlobalEnv$plot<-ggplot(tops,aes(x=Class,y=factor(Feature,levels=rev(displated_features)),fill=Log2CPM))+
       geom_tile()+
-      scale_fill_gradient(low="yellow",high="red",name="CPM",n.breaks=10)+
+      scale_fill_gradient(low="yellow",high="red",name="Log2(CPM)",n.breaks=5)+
       ylab("Feature")+
-      xlab("Group")+
+      xlab("")+
       theme_classic()
     if(show_raw_cpm_val=="1"){
       .GlobalEnv$plot<-plot+
-        geom_text(aes(label=Log2CPM))
+        geom_text(aes(label=round(Log2CPM,3)))
     }
     
   }
@@ -419,9 +490,9 @@ heat_data_ord$Log2CPM<-round(log2(heat_data_ord$CPM),3)
       .GlobalEnv$cur_selected_dat<-heat_data_ord[which(heat_data_ord$Feature==cur_selected),]
     
       message=paste("Feature: ",unique(cur_selected_dat$Feature),"\n",
-                    "LogFC: ",unique(cur_selected_dat$LogFC),"\n",
-                    "FDR: ",unique(cur_selected_dat$FDR),"\n",
-                    "Class/Log2(CPM): ",paste(cur_selected_dat$Class,round(cur_selected_dat$Log2CPM,3),collapse=" "),sep="")
+                    "LogFC: ",round(unique(cur_selected_dat$LogFC),3),"\n",
+                    "FDR: ",round(unique(cur_selected_dat$FDR),6),"\n",
+                    "Group/Log2(CPM): ",paste(cur_selected_dat$Class,round(cur_selected_dat$Log2CPM,3),collapse=" "),sep="")
       tk_messageBox(message=message)
       
     }
@@ -445,7 +516,7 @@ heat_data_ord$Log2CPM<-round(log2(heat_data_ord$CPM),3)
     scroll_fts<-tkscrollbar(graph_parm_frame,repeatinterval=1,command=also_scroll_command)
     tkgrid(scroll_fts,column=1,row=3,sticky="nsw")
     
-    feature_list<-tklistbox(graph_parm_frame,listvariable=all_features_var,height=10,width=12,selectmode="single",exportselection=FALSE,yscrollcommand=scroll_command)
+    feature_list<-tklistbox(graph_parm_frame,listvariable=all_features_var,height=10,width=20,selectmode="single",exportselection=FALSE,yscrollcommand=scroll_command)
     tkgrid(feature_list,column=1,sticky="w",padx=16,row=3)
     tkbind(feature_list,"<<ListboxSelect>>",select_a_feature)
     
@@ -453,7 +524,27 @@ heat_data_ord$Log2CPM<-round(log2(heat_data_ord$CPM),3)
     
   } else if(cur_plot_type=="Volcano Plot"){
     
+    select_volc_point<-function(){
+      
+      .GlobalEnv$cur_volc_point<-annot_fts[(as.numeric(tkcurselection(volc_feature_list))+1)]
+      
+      print(cur_volc_point)
+      
+      create_plot()
+      
+    }
+    
     render_title()
+    
+    feature_ttl<-tklabel(graph_parm_frame,text="Features")
+    tkgrid(feature_ttl,column=1,sticky="w",row=2)
+    
+    volcscroll<-tkscrollbar(graph_parm_frame,repeatinterval=1,command=function(...)tkyview(volc_feature_list,...))
+    tkgrid(volcscroll,column=1,row=3,sticky="nsw")
+    
+    volc_feature_list<-tklistbox(graph_parm_frame,listvariable=annot_fts_var,height=10,width=20,selectmode="single",exportselection=FALSE,yscrollcommand=function(...)tkset(volcscroll,...))
+    tkgrid(volc_feature_list,row=3,column=1,padx=16)
+    tkbind(volc_feature_list,"<<ListboxSelect>>",select_volc_point)
     
     create_plot()
     
@@ -506,6 +597,10 @@ tkgrid(gen_frame,column=1,row=4,pady=10)
 update_graph_parms()
   
 tkwait.window(analyze_gui)
-
+} else{
+  
+  tk_messageBox(message=paste("Design matrix file not found in ",exp_directory,".\n\nEnsure you have annotated your reads!",sep=""))
+  
+}
 
 

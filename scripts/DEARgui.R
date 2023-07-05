@@ -1149,7 +1149,7 @@ run_dear<-function(){
 #Open plot builder
 activate_plots<-function(){
   scrape_parms()
-  tryCatch(source(paste(this.dir(),"/4plotbuilder.R",sep="")),
+  tryCatch(source(paste(this.dir(),"/4plotbuilderv2.R",sep="")),
            error=function(e){
              tk_messageBox(message="Error reading 4plotbuilder.R!")
              close(calc_prog)
