@@ -20,7 +20,9 @@ package.list<-c("this.path",
                 "RColorBrewer",
                 "gplots",
                 "ggplot2",
-                "dplyr")
+                "dplyr",
+                "curl",
+                "tkrplot")
 n_pack<-length(package.list)
 prog_inc<-25/n_pack
 for(i in 1:length(package.list)){
@@ -32,9 +34,11 @@ for(i in 1:length(package.list)){
            })
 }
 
-setWinProgressBar(open_prog,value=25,label="Loading this.path and tcltk...")
+setWinProgressBar(open_prog,value=25,label="Loading this.path, tcltk, curl and tkrplot...")
 library(this.path)
 library(tcltk)
+library(curl)
+library(tkrplot)
 setWinProgressBar(open_prog,value=35,label="Loading dplyr and stringr...")
 library(dplyr)
 library(stringr)
@@ -438,7 +442,7 @@ install_files_func<-function(){
         .GlobalEnv$entered_fastq<-unlist(unname(read.delim2(paste(exp_directory,"/fastq_entry.txt",sep=""),header=FALSE,sep="\n")))
 
         #Remove fastq already in folder
-        already_download<-str_sub(list.files(forward_dir,pattern=".fastq.gz"),1,11)
+        already_download<-str_sub(list.files(forward_dir,pattern=".fastq.gz$"),1,10)
         if(length(already_download)>0){
           tk_messageBox(message=paste("Skipping: ",paste(already_download,collapse="\n"),sep="\n"))
           .GlobalEnv$entered_fastq<-entered_fastq[-which(entered_fastq%in%already_download)]
@@ -461,7 +465,7 @@ install_files_func<-function(){
               if(read_type=="Paired-end"){
                 acc_prefix<-str_sub(z,0,6)
                 last_dig<-paste("0",str_sub(z,-2),sep="")
-                link<-paste("http://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_dig,"/",z,sep="")
+                link<-paste("ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_dig,"/",z,sep="")
                 
                 file1<-paste(link,"/",z,"_1.fastq.gz",sep="")
                 file2<-paste(link,"/",z,"_2.fastq.gz",sep="")
@@ -476,7 +480,7 @@ install_files_func<-function(){
                     tk_messageBox(message="Expected forward/reverse format not detected!")
                     new_dir<-paste(fastq_dir,"/",file_name,sep="")
                   }
-                  tryCatch(download.file(x,destfile=new_dir,quiet = TRUE,mode="wb"),error=function(e){
+                  tryCatch(curl_download(x,destfile=new_dir,quiet = TRUE,mode="wb"),error=function(e){
                     tk_messageBox(message="Error during download. Ensure that your file is accessible at the ENA.")
                     close(tmp_instal)
                     stop()
@@ -487,17 +491,17 @@ install_files_func<-function(){
                 acc_prefix<-str_sub(z,0,6)
                 last_dig<-paste("00",str_sub(z,-1),sep="")
                 last_two_dig<-paste("0",str_sub(z,-2),sep="")
-                link<-paste("http://ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_dig,"/",z,sep="")
-                link_alt<-paste("http://ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_two_dig,"/",z,sep="")
+                link<-paste("ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_dig,"/",z,sep="")
+                link_alt<-paste("ftp://ftp.sra.ebi.ac.uk/vol1/fastq/",acc_prefix,"/",last_two_dig,"/",z,sep="")
                 .GlobalEnv$file1<-paste(link,"/",z,".fastq.gz",sep="")
                 .GlobalEnv$file1_alt<-paste(link_alt,"/",z,"_1.fastq.gz",sep="")
                 
                 file_name<-paste(z,".fastq.gz",sep="")
                 new_dir<-paste(forward_dir,"/",file_name,sep="")
                 
-                tryCatch(download.file(file1,destfile=new_dir,quiet = TRUE,mode="wb"),error=function(e){
+                tryCatch(curl_download(file1,destfile=new_dir,quiet = TRUE,mode="wb"),error=function(e){
                   #Try alternative link with underscore
-                  tryCatch(download.file(file1_alt,destfile=new_dir,quiet = TRUE,mode="wb"),error=function(w){
+                  tryCatch(curl_download(file1_alt,destfile=new_dir,quiet = TRUE,mode="wb"),error=function(w){
                     tk_messageBox(message="Error during download. Ensure that your file is accessible at the ENA.")
                     close(tmp_instal)
                     stop()
@@ -530,40 +534,64 @@ install_files_func<-function(){
   
   download_gen<-function(){
     
+    #https://api.ncbi.nlm.nih.gov/datasets/v2alpha/genome/accession/GCF_000001635.27/download?include_annotation_type=GENOME_FASTA
+    
     ass_var<-tclVar("GCF_000005845.2")
-    ass_var_2<-tclVar("ASM584v2")
     ass_entry_name<-tclVar("ecoli_k12")
     assembly_enr_func<-function(){
-      .GlobalEnv$ref_seq<-tclvalue(ass_var)
+      .GlobalEnv$ref_seq<-trimws(tclvalue(ass_var))
       print(ref_seq)
-      .GlobalEnv$ass_id<-tclvalue(ass_var_2)
-      print(ass_id)
-      .GlobalEnv$named_ass<-tclvalue(ass_entry_name)
+      .GlobalEnv$named_ass<-trimws(tclvalue(ass_entry_name))
       print(named_ass)
       
-      if(ref_seq!=""&&ass_id!=""&&named_ass!=""){
+      if(ref_seq!=""&&named_ass!=""){
         tkdestroy(assembly_entry)
-        digits<-str_replace_all(ref_seq,"[^[:digit:]]","")
-        first<-str_sub(digits,0,3)
-        sec<-str_sub(digits,4,6)
-        thir<-str_sub(digits,7,9)
         
-        #Get FTP link to genome assembly
-        #ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/308/975/GCF_000308975.1_ASM30897v2/GCF_000308975.1_ASM30897v2_genomic.fna.gz
-        .GlobalEnv$base<-paste("ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/",first,"/",sec,"/",thir,"/",ref_seq,"_",ass_id,"/",ref_seq,"_",ass_id,"_genomic.fna.gz",sep="")
+        #Get curl link to genome assembly
+        #https://api.ncbi.nlm.nih.gov/datasets/v2alpha/genome/accession/GCF_000005845.2/download?include_annotation_type=GENOME_FASTA&filename=GCF_000005845.2.zip
+        .GlobalEnv$base<-paste("https://api.ncbi.nlm.nih.gov/datasets/v2alpha/genome/accession/",ref_seq,"/download?include_annotation_type=GENOME_FASTA",sep="")
         
-        if(file.exists(paste(gen_dir,"/",named_ass,".fna.gz",sep=""))==FALSE){
+        
+        #OLD Get FTP link to genome assembly
+        #OLD ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/308/975/GCF_000308975.1_ASM30897v2/GCF_000308975.1_ASM30897v2_genomic.fna.gz
+        #OLD .GlobalEnv$base<-paste("ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/",first,"/",sec,"/",thir,"/",ref_seq,"_",ass_id,"/",ref_seq,"_",ass_id,"_genomic.fna.gz",sep="")
+        
+        if(file.exists(paste(gen_dir,"/",named_ass,".fna",sep=""))==FALSE){
           tmp_prog<-winProgressBar(title="Genome Download",
                                    label="Downloading genome...",
                                    min=0,max=100,width=300,initial = 50)
           
           options(timeout = 10000)
-          tryCatch(download.file(base,destfile=paste(gen_dir,"/",named_ass,".fna.gz",sep=""),quiet = TRUE),
+          
+          #Download the zip folder
+          curl_path<-paste(gen_dir,"/",named_ass,sep="")
+          curl_zip<-paste(curl_path,".zip",sep="")
+          tryCatch(curl_download(base,destfile=curl_zip,quiet = TRUE),
                    error=function(e){
                      tk_messageBox(message="Error downloading genome. Download cancelled.")
                      close(tmp_prog)
                      stop()
                    })
+          #Read files in zip folder
+          curl_files<-unzip(zipfile = curl_zip, list = TRUE)[,1]
+          #Get fna
+          fna_file<-curl_files[which(str_detect(curl_files,".fna")==TRUE)]
+          #Unzip fna file
+          unzip(zipfile=curl_zip,files=fna_file,exdir=gen_dir)
+          #Move fna file to gen_dir
+          fna_path<-paste(gen_dir,"/",fna_file,sep="")
+          new_fna_path<-paste(gen_dir,"/",named_ass,".fna",sep="")
+          file.rename(from=fna_path,to=new_fna_path)
+          #Remove extra directories
+          file.remove(curl_zip)
+          tryCatch(file.remove(paste(gen_dir,"/ncbi_dataset",sep="")),
+                   error=function(e){
+                     print("no ncbi dataset folder")
+                   },
+                   warning=function(w){
+                     print("permission denied")
+                   })
+          
           close(tmp_prog)
           shell.exec(gen_dir)
           options(timeout = 60)
@@ -571,21 +599,49 @@ install_files_func<-function(){
           tk_messageBox(message="You already have a genome assembly with that name!")
         }
         
-        #Get FTP link to genome annotation
-        #ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/308/975/GCF_000308975.1_ASM30897v2/GCF_000308975.1_ASM30897v2_genomic.fna.gz
-        .GlobalEnv$base2<-paste("ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/",first,"/",sec,"/",thir,"/",ref_seq,"_",ass_id,"/",ref_seq,"_",ass_id,"_genomic.gtf.gz",sep="")
-        if(file.exists(paste(annot_dir,"/",named_ass,"_genomic.gtf.gz",sep=""))==FALSE){
+        #OLD Get FTP link to genome annotation
+        #OLD ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/308/975/GCF_000308975.1_ASM30897v2/GCF_000308975.1_ASM30897v2_genomic.fna.gz
+        #OLD .GlobalEnv$base2<-paste("ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/",first,"/",sec,"/",thir,"/",ref_seq,"_",ass_id,"/",ref_seq,"_",ass_id,"_genomic.gtf.gz",sep="")
+        
+        #Get curl download for annotation
+        .GlobalEnv$base2<-paste("https://api.ncbi.nlm.nih.gov/datasets/v2alpha/genome/accession/",ref_seq,"/download?include_annotation_type=GENOME_GTF",sep="")
+        
+        if(file.exists(paste(annot_dir,"/",named_ass,"_genomic.gtf",sep=""))==FALSE){
           tmp_prog<-winProgressBar(title="Annotation Download",
                                    label="Downloading genome annotation...",
                                    min=0,max=100,width=300,initial = 50)
           
           options(timeout = 10000)
-          tryCatch(download.file(base2,destfile=paste(annot_dir,"/",named_ass,"_genomic.gtf.gz",sep=""),quiet = TRUE),
+          
+          curl_path_2<-paste(annot_dir,"/",named_ass,sep="")
+          curl_zip_2<-paste(curl_path_2,".zip",sep="")
+          tryCatch(curl_download(base2,destfile=curl_zip_2,quiet = TRUE),
                    error=function(e){
-                     tk_messageBox(message="Error downloading annotation. Download cancelled.")
+                     tk_messageBox(message="Error downloading annotation Download cancelled.")
                      close(tmp_prog)
                      stop()
                    })
+          #Read files in zip folder
+          curl_files<-unzip(zipfile = curl_zip_2, list = TRUE)[,1]
+          #Get fna
+          gtf_file<-curl_files[which(str_detect(curl_files,".gtf")==TRUE)]
+          #Unzip fna file
+          unzip(zipfile=curl_zip_2,files=gtf_file,exdir=annot_dir)
+          #Move fna file to gen_dir
+          gtf_path<-paste(annot_dir,"/",gtf_file,sep="")
+          new_gtf_path<-paste(annot_dir,"/",named_ass,".gtf",sep="")
+          file.rename(from=gtf_path,to=new_gtf_path)
+          
+          #Remove extra directories
+          file.remove(curl_zip_2)
+          tryCatch(file.remove(paste(annot_dir,"/ncbi_dataset",sep="")),
+                   error=function(e){
+                     print("no ncbi dataset folder")
+                   },
+                   warning=function(w){
+                     print("permission denied")
+                   })
+          
           close(tmp_prog)
           shell.exec(annot_dir)
           options(timeout = 60)
@@ -600,18 +656,14 @@ install_files_func<-function(){
     }
     
     assembly_entry<-tktoplevel()
-    tkwm.geometry(assembly_entry,"160x160+400+100")
+    tkwm.geometry(assembly_entry,"140x120+400+100")
     tkwm.title(assembly_entry,"Assembly Entry")
     ass_frame<-tkframe(assembly_entry)
     tkgrid(ass_frame)
-    ass_lbl<-tklabel(ass_frame,text="Assembly RefSeq:")
+    ass_lbl<-tklabel(ass_frame,text="NCBI RefSeq Assembly:")
     tkgrid(ass_lbl)
     ass_entry<-tkentry(ass_frame,textvariable=ass_var,width=20)
     tkgrid(ass_entry)
-    ass_lbl_2<-tklabel(ass_frame,text="Assembly name (no spaces):")
-    tkgrid(ass_lbl_2)
-    ass_entry_2<-tkentry(ass_frame,textvariable=ass_var_2)
-    tkgrid(ass_entry_2)
     ass_name<-tklabel(ass_frame,text="Name the download file:")
     tkgrid(ass_name)
     ass_entry_3<-tkentry(ass_frame,textvariable=ass_entry_name,width=20)
@@ -780,7 +832,6 @@ load_gen_file<-function(){
       write.table(parms,file=paste(exp_directory,"/Parameters.txt",sep=""),sep=",",eol="\n",quote = FALSE,row.names = FALSE)
    
     } else{
-      tk_messageBox(message="You didn't select a file!")
       tkconfigure(gen_sel,text="\n")
     }
   
@@ -789,8 +840,8 @@ load_gen_file<-function(){
 
 #Load annotation file
 load_ann_file<-function(){
-  .GlobalEnv$ann_file<-tk_choose.files(default=paste(annot_dir,"/SELECT_A_FILE",sep=""),multi=FALSE,filters=matrix(c(".gtf.gz",".gtf.gz",
-                                                                                        ".gtf",".gtf",
+  .GlobalEnv$ann_file<-tk_choose.files(default=paste(annot_dir,"/SELECT_A_FILE",sep=""),multi=FALSE,filters=matrix(c(".gtf",".gtf",
+                                                                                        ".gtf.gz",".gtf.gz",
                                                                                         "ALL","*"),3,2,byrow = TRUE),
                                        caption="Select an annotation file.")
   if(length(ann_file)>0){
@@ -804,7 +855,6 @@ load_ann_file<-function(){
     write.table(parms,file=paste(exp_directory,"/Parameters.txt",sep=""),sep=",",eol="\n",quote = FALSE,row.names = FALSE)
     read_gtf_function()
   } else{
-    tk_messageBox(message="You didn't select a file!")
     tkconfigure(ann_sel,text="\n")
   }
 }
@@ -1052,10 +1102,10 @@ run_dear<-function(){
               close(prog)
               stop()
             }) 
-          } else if(length(detected_bams)>0&&length(which(detected_bams==TRUE))==length(forward_files)){
+          } else if(length(detected_bams)>0&&length(detected_bams)==length(forward_files)){
             #If all fastq already aligned
             tk_messageBox(message=".BAM files already detected! Skipping read alignments.") 
-          } else if(length(detected_bams)>0&&length(which(detected_bams==TRUE))<length(forward_files)){
+          } else if(length(detected_bams)>0&&length(detected_bams)<length(forward_files)){
             #If only some fastq already aligned
             tk_messageBox(message="Some .BAM files are missing! Only these will be generated!")
             .GlobalEnv$forward_files<-forward_files[-detected_bam_inds]

@@ -3,6 +3,10 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
   
   scrape_parms()
   
+  #Read design matrix
+  .GlobalEnv$design<-data.frame(Intercept=1,
+                                GROUP=design_raw$GROUP)
+  
   #*****************************************************
   
   #******************CALCULATIONS AND PROCESSING*****************
@@ -42,7 +46,30 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
       .GlobalEnv$countdata<-countdata[-which(rownames(countdata)%in%zero_count_features),]
     }
     
-    #FORMAT FOR GGPLOT
+    #Convert to a DGE obj
+    dgeObj<-DGEList(countdata)
+    
+    #Normalize
+    dgeObj_norm<-calcNormFactors(dgeObj)
+    
+    #Get between-group (total dataset) variation
+    dgeObj_bwvar<-estimateCommonDisp(dgeObj_norm)
+    
+    #Get within-group (within gene) variation
+    dgeObj_wivar<-estimateGLMTrendedDisp(dgeObj_bwvar)
+    dgeObj_tag<-estimateTagwiseDisp(dgeObj_wivar)
+    
+    #Fit GLM
+    fit<-glmFit(dgeObj_tag,design)
+    
+    #Conduct lilklihood ratio test for significance
+    lrt<-glmLRT(fit)
+    
+    #Calculate FDR for all genes
+    top_genes<-topTags(lrt,n=nrow(lrt$table))
+    
+    #FORMAT CPM DATA FOR GGPLOT
+      #Cols for Seq, Feature, Reads, CPM, Log2CPM, Class, ClassSeq, Class_Ft, Avg
     mycpm<-lapply(1:length(seqs),function(x){
       tmp_counts<-countdata[,x,drop=FALSE]
       df<-data.frame(Seq=names(tmp_counts),Feature=rownames(tmp_counts),Reads=tmp_counts[,1])
@@ -72,6 +99,7 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
     }
     vars<-tapply(class_avg_cur$Avg,class_avg_cur$Feature,var)
     fcs<-tapply(class_avg_cur$Avg,class_avg_cur$Feature,fold_change_func)
+    
     #Create df matching feature with var(mean(log2(cpm))) and fc
     vars_df<-data.frame(Feature=names(vars),
                         Var=vars,
@@ -85,7 +113,7 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
     class_avg_cur<-unique(class_avg_cur)
     .GlobalEnv$mycpm_cur<-left_join(mycpm_cur,class_avg_cur,by="Class_Ft")
     
-    #VOLCANO PLOT
+    #ADD SIGNIFIGANCES
     calc_tests<-lapply(unique(mycpm_cur$Feature),function(x){
       y<-mycpm_cur[which(mycpm_cur$Feature==x),]
       #T-test
@@ -131,7 +159,8 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
     .GlobalEnv$mycpm_cur<-read.csv(paste(fastq_dir,"/cpm.csv",sep=""))
     
     #READS/CPM (get data for <30 reads)
-    .GlobalEnv$reads_plot_data<-mycpm_cur[which(mycpm_cur$Reads<quantile(mycpm_cur$Reads,0.1)[[1]]),]
+    #.GlobalEnv$reads_plot_data<-mycpm_cur[which(mycpm_cur$Reads<quantile(mycpm_cur$Reads,0.25)[[1]]),]
+    .GlobalEnv$reads_plot_data<-mycpm_cur
     
     #Read vars_df (variances, fcs and stats)
     .GlobalEnv$vars_df<-read.table(paste(fastq_dir,"/fcs.csv",sep=""),row.names = 1,sep=",",header=TRUE)
@@ -149,6 +178,9 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
     .GlobalEnv$class_seq<-c(class_seq,paste(design_raw[which(design_raw$Classification==raw_classes[2]),]$Classification,1:length(design_raw[which(design_raw$Classification==raw_classes[2]),]$Classification),sep=" "))
     .GlobalEnv$classes<-design_raw$Classification
     
+    design_cur<-design_raw
+    design_cur$Class<-classes
+    .GlobalEnv$design_cur<-design_cur
     
   }
   
@@ -514,7 +546,7 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
       sum<-as.data.frame(tapply(plot_data$Reads,plot_data$Seq,sum))
       names(sum)<-"Sum"
       sum$Seq<-rownames(sum)
-      sum$Class<-classes
+      sum$Class<-design_cur[match(sum$Seq,design_cur$Seq),]$Class
       #Select seqs
       sum<-sum[which(sum$Seq%in%selected_seqs),]
       .GlobalEnv$sum<-sum
@@ -592,7 +624,7 @@ if(file.exists(paste(fastq_dir,"/rawfeaturecounts.csv",sep=""))==TRUE){
       
       if(apply_threshold_val=="1"){
         #Get genes below thresh
-        .GlobalEnv$below<-unique(mycpm_cur[which(mycpm_cur$CPM<saved_thresh),]$Feature)
+        .GlobalEnv$below<-unique(mycpm_cur[which(mycpm_cur$CPM<as.numeric(saved_thresh)),]$Feature)
         
         #Reset selected gene if below thresh
         if(is.na(selected_sig_ft)==FALSE&&selected_sig_ft%in%below){
