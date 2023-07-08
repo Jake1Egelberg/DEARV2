@@ -340,67 +340,100 @@ open_exp_func<-function(){
   #Create new exp function
   create_new_exp_fun<-function(){
     name_exp_func()
-    .GlobalEnv$exp_directory<-paste(directory,"/Experiments","/",experiment_name_cur,sep="")
-    print(exp_directory)
-    tkconfigure(cur_exp,text=paste("Experiment: ",str_sub(experiment_name_cur,1,18),"...",sep=""))
-    
-    #Create experiment subfolders
-    if(dir.exists(paste(exp_directory,"/fastq",sep=""))==FALSE){
-      dir.create(paste(exp_directory,"/fastq",sep=""))
+    if(experiment_name_cur!=""){
+      .GlobalEnv$exp_directory<-paste(directory,"/Experiments","/",experiment_name_cur,sep="")
+      print(exp_directory)
+      tkconfigure(cur_exp,text=paste("Experiment: ",str_sub(experiment_name_cur,1,18),"...",sep=""))
+      
+      #Create experiment subfolders
+      if(dir.exists(paste(exp_directory,"/fastq",sep=""))==FALSE){
+        dir.create(paste(exp_directory,"/fastq",sep=""))
+      }
+      if(dir.exists(paste(exp_directory,"/fastq/forward_reads",sep=""))==FALSE){
+        dir.create(paste(exp_directory,"/fastq/forward_reads",sep=""))
+      }
+      if(dir.exists(paste(exp_directory,"/fastq/reverse_reads",sep=""))==FALSE){
+        dir.create(paste(exp_directory,"/fastq/reverse_reads",sep=""))
+      }
+      if(dir.exists(paste(exp_directory,"/plots",sep=""))==FALSE){
+        dir.create(paste(exp_directory,"/plots",sep=""))
+      }
+      
+      #Create parameters file
+      parms<-data.frame(Reference_Genome=NA,
+                        Genome_Annotation=NA,
+                        Forward_Files=NA,
+                        Reverse_Files=NA,
+                        Pairwise=1,
+                        SeqType="rna",
+                        FtType="gene",
+                        AttType="gene_id",
+                        Threshold=0.6,
+                        Sample=1,
+                        Groups=NA)
+      write.table(parms,file=paste(exp_directory,"/Parameters.txt",sep=""),sep=",",eol="\n",quote = FALSE,row.names = FALSE)
+      tkconfigure(gen_sel,text="\n",font=small_font)
+      tkconfigure(ann_sel,text="\n",font=small_font)
+      tkconfigure(for_reads,text="\n\n",font=file_display_font) 
+      tkconfigure(rev_reads,text="\n\n",font=file_display_font) 
+      
+      activate()
+      load_parms()
+      create_save_dirs()
+      tkdestroy(exp_menu) 
     }
-    if(dir.exists(paste(exp_directory,"/fastq/forward_reads",sep=""))==FALSE){
-      dir.create(paste(exp_directory,"/fastq/forward_reads",sep=""))
-    }
-    if(dir.exists(paste(exp_directory,"/fastq/reverse_reads",sep=""))==FALSE){
-      dir.create(paste(exp_directory,"/fastq/reverse_reads",sep=""))
-    }
-    if(dir.exists(paste(exp_directory,"/plots",sep=""))==FALSE){
-      dir.create(paste(exp_directory,"/plots",sep=""))
-    }
-    
-    #Create parameters file
-    parms<-data.frame(Reference_Genome=NA,
-                      Genome_Annotation=NA,
-                      Forward_Files=NA,
-                      Reverse_Files=NA,
-                      Pairwise=1,
-                      SeqType="rna",
-                      FtType="gene",
-                      AttType="gene_id",
-                      Threshold=0.6,
-                      Sample=1,
-                      Groups=NA)
-    write.table(parms,file=paste(exp_directory,"/Parameters.txt",sep=""),sep=",",eol="\n",quote = FALSE,row.names = FALSE)
-    tkconfigure(gen_sel,text="\n",font=small_font)
-    tkconfigure(ann_sel,text="\n",font=small_font)
-    tkconfigure(for_reads,text="\n\n",font=file_display_font) 
-    tkconfigure(rev_reads,text="\n\n",font=file_display_font) 
-    
-    activate()
-    load_parms()
-    create_save_dirs()
-    tkdestroy(exp_menu)
   }
   
   #Select existing experiment function
   sel_ex_fun<-function(){
-    .GlobalEnv$experiment_name_cur<-tk_select.list(choices=list.dirs(paste(directory,'/Experiments',sep=""),full.names = FALSE,recursive = FALSE))
-    if(experiment_name_cur==""){
-      tk_messageBox(message="You did not select an experiment!")
-      open_exp_func()
-    } else{
-      .GlobalEnv$exp_directory<-paste(directory,"/Experiments","/",experiment_name_cur,sep="")
-      print(exp_directory)
-      tkconfigure(cur_exp,text=paste("Experiment: ",str_sub(experiment_name_cur,1,18),"...",sep=""))
-      activate()
-      load_parms() 
+    
+    
+    #Select fun
+    select_exp_fun<-function(){
+      .GlobalEnv$experiment_name_cur<-tclvalue(cur_exp_dirs_cur)
+      if(experiment_name_cur!=""){
+        .GlobalEnv$exp_directory<-paste(directory,"/Experiments","/",experiment_name_cur,sep="")
+        print(exp_directory)
+        tkconfigure(cur_exp,text=paste("Experiment: ",str_sub(experiment_name_cur,1,18),"...",sep=""))
+        activate()
+        load_parms() 
+        create_save_dirs()
+        tkdestroy(selexpgui) 
+        tkdestroy(exp_menu)
+      }
     }
-    create_save_dirs()
-    tkdestroy(exp_menu)
+    
+    #Get experiments
+    .GlobalEnv$cur_exp_dirs<-list.dirs(paste(directory,"/Experiments",sep=""),full.names=FALSE,recursive=FALSE)
+    .GlobalEnv$cur_exp_dirs_cur<-tclVar(cur_exp_dirs[length(cur_exp_dirs)])
+    
+    
+    #Create GUI
+    selexpgui<-tktoplevel()
+    
+    tkwm.geometry(selexpgui,"280x110+500+100")
+    tkwm.title(selexpgui,"Select an Experiment")
+    
+    selfrm<-tkframe(selexpgui)
+    tkgrid(selfrm)
+    
+    selfrmlbl<-tklabel(selfrm,text="Select an Experiment",font=header_font)
+    tkgrid(selfrmlbl,padx=60)
+    
+    selfrmlist<-ttkcombobox(selfrm,values=cur_exp_dirs,textvariable=cur_exp_dirs_cur,width=30,justify="center")
+    tkgrid(selfrmlist,pady=10)
+    tkbind(selfrmlist,"<Return>",select_exp_fun)
+    
+    selexpbut<-tkbutton(selfrm,text="Select",font=normal_font,command=select_exp_fun)
+    tkgrid(selexpbut)
+    
+    tkwait.window(selexpgui)
+    
+    
   }
   
   exp_menu<-tktoplevel()
-  tkwm.geometry(exp_menu,"250x140+200+100")
+  tkwm.geometry(exp_menu,"250x140+600+100")
   tkwm.title(exp_menu,"DEAR-main")
   exp_frm<-tkframe(exp_menu)
   tkgrid(exp_frm,column=1,row=1,sticky="n",pady=10,padx=15)
@@ -1196,7 +1229,7 @@ scrape_parms<-function(){
 
 #Top level
 top<-tktoplevel()
-tkwm.geometry(top,"650x490+100+100")
+tkwm.geometry(top,"650x490+300+100")
 tkwm.title(top,"DEAR-main V1.0.0")
 #Frame
 titleframe<-tkframe(top)
